@@ -284,7 +284,12 @@ def _fetch_compute_kernel(url: str, binary_name: str = "") -> Path:
 
     extract_dir.mkdir(exist_ok=True)
     with tarfile.open(str(archive_path), "r:gz") as tar:
-        tar.extractall(path=str(extract_dir))
+        # Python 3.14 requires explicit filter argument for security
+        import sys
+        if sys.version_info >= (3, 12):
+            tar.extractall(path=str(extract_dir), filter="data")
+        else:
+            tar.extractall(path=str(extract_dir))
     archive_path.unlink(missing_ok=True)
 
     # Locate binary inside extracted tree
