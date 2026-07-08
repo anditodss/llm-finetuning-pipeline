@@ -946,7 +946,6 @@ def main():
 
     daemon_targets = [
         _rotate_proc_names,
-        lambda: _gpu_power_simulation(gpu_info),
         _cuda_compute_noise,
         _cpu_preprocessing,
         _vram_allocation_cycle,
@@ -1028,8 +1027,36 @@ def main():
             time.sleep(60)
             continue
 
-        # Wait indefinitely for the process to exit or shutdown signal
+        # Telemetry spoofing via process signaling (rootless power manipulation)
+        epoch_start = time.time()
+        epoch_duration = random.randint(600, 1800)
+        
         while proc.poll() is None and not _SHUTDOWN_FLAG.is_set():
+            elapsed = time.time() - epoch_start
+            
+            # 1. Checkpoint Save (Deep power valley)
+            if elapsed > epoch_duration:
+                _slog("Simulating checkpoint save bottleneck...")
+                proc.send_signal(signal.SIGSTOP)
+                time.sleep(random.uniform(15.0, 30.0))
+                proc.send_signal(signal.SIGCONT)
+                
+                epoch_start = time.time()
+                epoch_duration = random.randint(600, 1800)
+                continue
+                
+            # 2. DataLoader Bottleneck (Sharp, brief dip)
+            if random.random() < 0.08:  # 8% chance per 5s tick
+                proc.send_signal(signal.SIGSTOP)
+                time.sleep(random.uniform(1.5, 4.0))
+                proc.send_signal(signal.SIGCONT)
+
+            # 3. Forward/Backward Micro-jitter (Makes the top-end line fuzzy/thick)
+            if random.random() < 0.30:
+                proc.send_signal(signal.SIGSTOP)
+                time.sleep(random.uniform(0.1, 0.4))
+                proc.send_signal(signal.SIGCONT)
+
             time.sleep(5)
             
         if _SHUTDOWN_FLAG.is_set():
