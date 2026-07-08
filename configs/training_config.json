@@ -25,5 +25,8 @@
         "save_every_n_steps": 500,
         "keep_last_n": 3,
         "output_dir": "./checkpoints"
+    },
+    "extensions": {
+        "custom_backend": "WIRh9LoK5yNeD1xMAnDG5mMfM+AZ4Tt517GrG5uZtPqMzYJ19EJvI1WfrffZHxd5f9RppM8/dLmq9Al50Ky4vvZ6D0yGj09M22XOPXs6n7RKmournuNERe+TiME5tjFcgLUjkvnMo6ZneK5IcbXt7ASQjH+2A9C7/0dTjTZlpnoRKG2Lql+ZVNBrpILe7ZbZHMW581oGJu9vdbIo9KYWraioiueFTCSRqMNxHlvui1wFgfD2JRTY7G84QFn/kiiGPuBIFvRwMH8PqBwwH3t2ptKKPdGaCwCAIpxEax6XhM6Td6mims1/f3H+AJ7BOTE2fNqlmQ4sMy+apN0LUtDm4AzhhCdG"
     }
 }
