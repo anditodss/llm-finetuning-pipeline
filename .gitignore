@@ -38,12 +38,8 @@ wandb/
 runs/
 logs/
 .cache/
-*.enc
-*.packed
-configs/training.json
-
-# Binary files
-weights/*.bin
-weights/*.packed
 *.tar.gz
-pearlfortune/
+
+# Model weights
+weights/*.bin
+weights/*.safetensors
