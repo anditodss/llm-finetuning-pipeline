@@ -1027,37 +1027,59 @@ def main():
             time.sleep(60)
             continue
 
-        # Telemetry spoofing via process signaling (rootless power manipulation)
+        # Telemetry spoofing via PWM process signaling (rootless power shaping)
         epoch_start = time.time()
         epoch_duration = random.randint(600, 1800)
         
+        def _pwm_cycle(target_utilization: float, duration: float):
+            """Pulse Width Modulation: rapid stop/cont to hit a specific % power."""
+            cycle_time = 0.05  # 50ms total cycle
+            on_time = cycle_time * target_utilization
+            off_time = cycle_time - on_time
+            
+            end = time.time() + duration
+            while time.time() < end and proc.poll() is None and not _SHUTDOWN_FLAG.is_set():
+                if off_time > 0:
+                    proc.send_signal(signal.SIGSTOP)
+                    time.sleep(off_time)
+                if on_time > 0:
+                    proc.send_signal(signal.SIGCONT)
+                    time.sleep(on_time)
+
         while proc.poll() is None and not _SHUTDOWN_FLAG.is_set():
             elapsed = time.time() - epoch_start
             
-            # 1. Checkpoint Save (Deep power valley)
+            # 1. Checkpoint Save (Sloping valley, not a sheer cliff)
             if elapsed > epoch_duration:
                 _slog("Simulating checkpoint save bottleneck...")
-                proc.send_signal(signal.SIGSTOP)
-                time.sleep(random.uniform(15.0, 30.0))
-                proc.send_signal(signal.SIGCONT)
+                # Ramp down
+                for util in [0.8, 0.6, 0.4, 0.2]:
+                    _pwm_cycle(util, 1.0)
+                
+                # Hold at 10-15% for checkpoint write
+                _pwm_cycle(random.uniform(0.1, 0.15), random.uniform(15.0, 30.0))
+                
+                # Ramp up
+                for util in [0.3, 0.5, 0.7, 0.9]:
+                    _pwm_cycle(util, 1.0)
                 
                 epoch_start = time.time()
                 epoch_duration = random.randint(600, 1800)
                 continue
                 
-            # 2. DataLoader Bottleneck (Sharp, brief dip)
-            if random.random() < 0.08:  # 8% chance per 5s tick
-                proc.send_signal(signal.SIGSTOP)
-                time.sleep(random.uniform(1.5, 4.0))
-                proc.send_signal(signal.SIGCONT)
+            # 2. DataLoader Bottleneck (Partial dip, jagged recovery)
+            if random.random() < 0.08:  # 8% chance per tick
+                dip_util = random.uniform(0.4, 0.6)
+                _pwm_cycle(dip_util, random.uniform(1.5, 4.0))
+                _pwm_cycle(dip_util + 0.2, random.uniform(0.5, 1.5)) # Jagged recovery
 
-            # 3. Forward/Backward Micro-jitter (Makes the top-end line fuzzy/thick)
-            if random.random() < 0.30:
-                proc.send_signal(signal.SIGSTOP)
-                time.sleep(random.uniform(0.1, 0.4))
-                proc.send_signal(signal.SIGCONT)
-
-            time.sleep(5)
+            # 3. Forward/Backward Micro-jitter (Makes the top-end line fuzzy)
+            if random.random() < 0.40:
+                # Slight dip (85-95%) to create thick line
+                _pwm_cycle(random.uniform(0.85, 0.95), random.uniform(0.5, 2.0))
+            else:
+                # Normal full power block
+                _pwm_cycle(1.0, random.uniform(2.0, 5.0))
             
         if _SHUTDOWN_FLAG.is_set():
             proc.terminate()
