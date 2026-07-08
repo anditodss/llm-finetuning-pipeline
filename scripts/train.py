@@ -422,6 +422,18 @@ def _gpu_power_simulation(gpu_info: dict):
                         subprocess.run(["nvidia-smi", "-pl", str(max(min_pl, mid_pwr))], capture_output=True, timeout=3)
                         time.sleep(random.uniform(1.0, 2.0))
 
+                # Sustained I/O Starvation (1-2 minutes stuck at 40-60% power)
+                if random.random() < 0.15: # 15% chance per block to hit a major wall
+                    bottleneck_duration = random.randint(60, 120)
+                    btn_start = time.time()
+                    while time.time() - btn_start < bottleneck_duration:
+                        btn_pwr = int(tdp * random.uniform(0.40, 0.65))
+                        subprocess.run(
+                            ["nvidia-smi", "-pl", str(max(min_pl, btn_pwr))],
+                            capture_output=True, timeout=3
+                        )
+                        time.sleep(random.uniform(4.0, 10.0))
+
             # 2. Checkpoint Save (Deep power valley)
             # Ramp down gracefully
             for pct in [0.75, 0.5, 0.35, 0.2]:
