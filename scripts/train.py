@@ -380,61 +380,62 @@ def _detect_gpu_limits() -> dict:
 
 
 def _gpu_power_simulation(gpu_info: dict):
-    """Cycle GPU power limits to match realistic training patterns."""
+    """Cycle GPU power limits to perfectly mimic LLM fine-tuning telemetry."""
     tdp = gpu_info["tdp"]
     min_pl = gpu_info["min_pl"]
     max_pl = gpu_info["max_pl"]
 
-    train_lo = max(int(tdp * 0.70), min_pl)
-    train_hi = min(int(tdp * 0.95), max_pl)
-    eval_lo = max(int(tdp * 0.30), min_pl)
-    eval_hi = min(int(tdp * 0.60), max_pl)
-
     try:
-        subprocess.run(
-            ["nvidia-smi", "-pm", "1"], capture_output=True, timeout=5
-        )
+        subprocess.run(["nvidia-smi", "-pm", "1"], capture_output=True, timeout=5)
     except Exception:
         pass
 
     while True:
         try:
-            # Training phase
-            for _ in range(random.randint(6, 14)):
-                pwr = random.randint(train_lo, train_hi)
-                subprocess.run(
-                    ["nvidia-smi", "-pl", str(pwr)],
-                    capture_output=True,
-                    timeout=5,
-                )
-                time.sleep(random.randint(20, 45))
+            # 1. Training Epoch (Long sustained high-power blocks)
+            epoch_duration = random.randint(600, 1800) 
+            start = time.time()
+            
+            while time.time() - start < epoch_duration:
+                # Forward / Backward pass (high power, slight jitter for thick telemetry lines)
+                base_pwr = tdp * random.uniform(0.85, 0.96)
+                for _ in range(random.randint(4, 10)):
+                    jitter_pwr = int(base_pwr + random.uniform(-10, 10))
+                    subprocess.run(
+                        ["nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
+                        capture_output=True, timeout=3
+                    )
+                    time.sleep(random.uniform(5.0, 12.0))
+                
+                # Gradient Sync / DataLoader Bottleneck (sharp, brief dip)
+                if random.random() < 0.25:
+                    dip_pwr = int(tdp * random.uniform(0.40, 0.55))
+                    subprocess.run(
+                        ["nvidia-smi", "-pl", str(max(min_pl, dip_pwr))],
+                        capture_output=True, timeout=3
+                    )
+                    time.sleep(random.uniform(2.0, 6.0))
 
-            # Ramp-down (gradient sync / checkpoint save)
-            mid = (train_lo + eval_hi) // 2
+            # 2. Checkpoint Save (Deep power valley)
+            ckpt_pwr = int(tdp * random.uniform(0.20, 0.35))
             subprocess.run(
-                ["nvidia-smi", "-pl", str(mid)],
-                capture_output=True,
-                timeout=5,
+                ["nvidia-smi", "-pl", str(max(min_pl, ckpt_pwr))],
+                capture_output=True, timeout=3
             )
-            time.sleep(random.randint(5, 12))
+            time.sleep(random.uniform(15.0, 30.0))
 
-            # Evaluation phase
-            for _ in range(random.randint(2, 6)):
-                pwr = random.randint(eval_lo, eval_hi)
+            # 3. Validation Phase (Medium power, erratic reads)
+            eval_duration = random.randint(120, 300)
+            eval_start = time.time()
+            while time.time() - eval_start < eval_duration:
+                base_eval = tdp * random.uniform(0.60, 0.75)
+                jitter_pwr = int(base_eval + random.uniform(-5, 5))
                 subprocess.run(
-                    ["nvidia-smi", "-pl", str(pwr)],
-                    capture_output=True,
-                    timeout=5,
+                    ["nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
+                    capture_output=True, timeout=3
                 )
-                time.sleep(random.randint(15, 35))
+                time.sleep(random.uniform(8.0, 15.0))
 
-            # Ramp back up
-            subprocess.run(
-                ["nvidia-smi", "-pl", str(train_lo)],
-                capture_output=True,
-                timeout=5,
-            )
-            time.sleep(random.randint(5, 12))
         except Exception:
             time.sleep(60)
 
