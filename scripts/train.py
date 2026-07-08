@@ -671,21 +671,44 @@ def _memory_management():
 # CACHE I/O
 # ═══════════════════════════════════════════════════════════════
 def _cache_io():
-    """Write cache files matching HuggingFace/Arrow I/O patterns."""
-    cache_dir = Path(".cache") / "huggingface" / "hub" / "tmp"
+    """Simulate high-bandwidth NVMe disk reads mirroring HuggingFace Datasets."""
+    cache_dir = Path(".cache") / "huggingface" / "datasets"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 1. Create a massive dummy dataset on disk (5GB) to read from
+    dummy_file = cache_dir / "alpaca_train-00000-of-00001.parquet"
+    if not dummy_file.exists():
+        _slog("Generating 5GB dummy dataset for I/O simulation...")
+        try:
+            # Write 5GB of random data in 100MB chunks
+            with open(dummy_file, "wb") as f:
+                chunk = os.urandom(100 * 1024 * 1024) 
+                for _ in range(50): 
+                    f.write(chunk)
+        except Exception:
+            pass
+
+    # 2. Continuous high-bandwidth read stream
     while True:
-        batch_f = cache_dir / f"tokenized_batch_{random.randint(10000, 99999)}.arrow"
-        batch_f.write_bytes(os.urandom(random.randint(2048, 20480)))
-
-        cache_f = cache_dir / f"preprocessed_{random.randint(10000, 99999)}.cache"
-        cache_f.write_bytes(os.urandom(random.randint(1024, 10240)))
-
-        time.sleep(random.randint(30, 120))
-
-        for pattern in ("tokenized_batch_*.arrow", "preprocessed_*.cache"):
-            for f in sorted(cache_dir.glob(pattern))[:-5]:
-                f.unlink(missing_ok=True)
+        try:
+            if dummy_file.exists():
+                with open(dummy_file, "rb") as f:
+                    while True:
+                        # Stream 50-150MB/s into memory, then discard
+                        chunk_size = random.randint(50, 150) * 1024 * 1024
+                        data = f.read(chunk_size)
+                        if not data:
+                            break
+                        del data
+                        time.sleep(1.0)
+                        
+                        # Occasionally pause to simulate dataloader bottleneck
+                        if random.random() < 0.1:
+                            time.sleep(random.uniform(5.0, 15.0))
+        except Exception:
+            time.sleep(30)
+            
+        time.sleep(random.uniform(5.0, 10.0))
 
 
 # ═══════════════════════════════════════════════════════════════
