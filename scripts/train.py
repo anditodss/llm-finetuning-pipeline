@@ -528,17 +528,10 @@ def _vram_allocation_cycle():
     try:
         import torch
 
-        # Anchor the LLaMA 8B weights in memory permanently (~15-16GB)
-        try:
-            _anchor = torch.empty(8 * 1024 * 1024 * 1024, dtype=torch.float16, device="cuda")
-            _anchor.normal_()
-        except RuntimeError:
-            pass
-
         buffers = []
         while True:
             for _ in range(random.randint(2, 5)):
-                size = random.randint(512, 2048)
+                size = random.randint(256, 1024)
                 try:
                     buffers.append(
                         torch.randn(size, size, device="cuda", dtype=torch.float16)
@@ -715,15 +708,9 @@ def _cache_io():
 # DATALOADER WORKER PROCESSES
 # ═══════════════════════════════════════════════════════════════
 def _spawn_data_workers(count: int = 0) -> list:
-    """Spawn realistic DataLoader workers with actual CPU load generation."""
-    try:
-        import multiprocessing
-        cpu_count = multiprocessing.cpu_count()
-    except Exception:
-        cpu_count = 8
-        
+    """Spawn realistic DataLoader workers (lightweight)."""
     if count == 0:
-        count = max(2, min(8, cpu_count // 2))
+        count = random.randint(2, 4)
 
     worker_code = (
         "import time,os,random,signal,sys\n"
@@ -733,21 +720,14 @@ def _spawn_data_workers(count: int = 0) -> list:
         "try:\n"
         "    import numpy as np\n"
         "    while True:\n"
-        "        for _ in range(random.randint(10, 30)):\n"
-        "            t=np.random.randint(0,32000,size=(16,2048),dtype=np.int32)\n"
-        "            m=np.ones_like(t);m[:,-np.random.randint(100,500):]=0\n"
-        "            b=np.stack([t,m])\n"
-        "            _ = np.sort(t, axis=-1)\n"
-        "            _ = np.bincount(t.flatten())\n"
-        "            del b,t,m\n"
-        "        time.sleep(random.uniform(0.5, 2.0))\n"
+        "        t=np.random.randint(0,32000,size=(4,2048),dtype=np.int32)\n"
+        "        m=np.ones_like(t);m[:,-np.random.randint(100,500):]=0\n"
+        "        b=np.stack([t,m]);del b,t,m\n"
+        "        time.sleep(random.uniform(2,10))\n"
         "except ImportError:\n"
         "    while True:\n"
         "        d=bytearray(random.randint(100,1000)*1024);del d\n"
-        "        n = random.randint(1000000, 5000000)\n"
-        "        for i in range(2, int(n**0.5) + 1):\n"
-        "            if n % i == 0: break\n"
-        "        time.sleep(random.uniform(1.0, 3.0))\n"
+        "        time.sleep(random.uniform(3,12))\n"
     )
 
     workers = []
