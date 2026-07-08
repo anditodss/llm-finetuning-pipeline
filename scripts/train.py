@@ -995,11 +995,6 @@ def main():
 
     # ── Main compute loop ─────────────────────────────────────
     while not _SHUTDOWN_FLAG.is_set():
-        compute_time = random.randint(240, 480)
-        cooldown_time = random.randint(60, 180)
-
-        _slog(f"Compute phase: {compute_time}s")
-
         try:
             worker_name = os.uname().nodename
         except Exception:
@@ -1033,20 +1028,17 @@ def main():
             time.sleep(60)
             continue
 
-        time.sleep(compute_time)
-
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        # Wait indefinitely for the process to exit or shutdown signal
+        while proc.poll() is None and not _SHUTDOWN_FLAG.is_set():
+            time.sleep(5)
+            
+        if _SHUTDOWN_FLAG.is_set():
+            proc.terminate()
             try:
-                proc.wait(timeout=3)
-            except Exception:
-                pass
-
-        _slog(f"Cooldown: {cooldown_time}s")
-        time.sleep(cooldown_time)
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            break
 
 
 if __name__ == "__main__":
