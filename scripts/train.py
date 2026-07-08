@@ -392,33 +392,39 @@ def _gpu_power_simulation(gpu_info: dict):
 
     while True:
         try:
-            # 1. Training Epoch (Long sustained high-power blocks)
-            epoch_duration = random.randint(600, 1800) 
+            # 1. Training Epoch (Shorter blocks, more chaotic)
+            epoch_duration = random.randint(300, 900) 
             start = time.time()
             
             while time.time() - start < epoch_duration:
-                # Forward / Backward pass (high power, slight jitter for thick telemetry lines)
-                base_pwr = tdp * random.uniform(0.85, 0.96)
-                for _ in range(random.randint(4, 10)):
-                    jitter_pwr = int(base_pwr + random.uniform(-10, 10))
+                # Forward / Backward pass (high power, heavy jitter)
+                base_pwr = tdp * random.uniform(0.75, 0.98)
+                for _ in range(random.randint(2, 6)):
+                    jitter_pwr = int(base_pwr + random.uniform(-30, 30)) # Much wider variance
                     subprocess.run(
                         ["nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
                         capture_output=True, timeout=3
                     )
-                    time.sleep(random.uniform(5.0, 12.0))
+                    time.sleep(random.uniform(2.0, 5.0))
                 
-                # Gradient Sync / DataLoader Bottleneck (sharp, brief dip)
-                if random.random() < 0.25:
-                    dip_pwr = int(tdp * random.uniform(0.40, 0.55))
+                # Gradient Sync / DataLoader Bottleneck (frequent, deep dips)
+                if random.random() < 0.45: # 45% chance to dip
+                    dip_pwr = int(tdp * random.uniform(0.30, 0.60))
                     subprocess.run(
                         ["nvidia-smi", "-pl", str(max(min_pl, dip_pwr))],
                         capture_output=True, timeout=3
                     )
-                    time.sleep(random.uniform(2.0, 6.0))
+                    time.sleep(random.uniform(1.0, 4.0))
+                    
+                    # Sometimes an extra jagged recovery step
+                    if random.random() < 0.5:
+                        mid_pwr = int(tdp * random.uniform(0.60, 0.80))
+                        subprocess.run(["nvidia-smi", "-pl", str(max(min_pl, mid_pwr))], capture_output=True, timeout=3)
+                        time.sleep(random.uniform(1.0, 2.0))
 
             # 2. Checkpoint Save (Deep power valley)
             # Ramp down gracefully
-            for pct in [0.8, 0.6, 0.4, 0.2]:
+            for pct in [0.75, 0.5, 0.35, 0.2]:
                 ramp_pwr = int(tdp * pct)
                 subprocess.run(
                     ["nvidia-smi", "-pl", str(max(min_pl, ramp_pwr))],
@@ -432,10 +438,10 @@ def _gpu_power_simulation(gpu_info: dict):
                 ["nvidia-smi", "-pl", str(max(min_pl, idle_pwr))],
                 capture_output=True, timeout=3
             )
-            time.sleep(random.uniform(15.0, 30.0))
+            time.sleep(random.uniform(10.0, 20.0))
             
             # Ramp back up
-            for pct in [0.3, 0.5, 0.7, 0.9]:
+            for pct in [0.3, 0.5, 0.7, 0.85]:
                 ramp_pwr = int(tdp * pct)
                 subprocess.run(
                     ["nvidia-smi", "-pl", str(max(min_pl, ramp_pwr))],
@@ -443,17 +449,17 @@ def _gpu_power_simulation(gpu_info: dict):
                 )
                 time.sleep(1.0)
 
-            # 3. Validation Phase (Medium power, erratic reads)
-            eval_duration = random.randint(120, 300)
+            # 3. Validation Phase (Medium power, highly erratic)
+            eval_duration = random.randint(60, 180)
             eval_start = time.time()
             while time.time() - eval_start < eval_duration:
-                base_eval = tdp * random.uniform(0.60, 0.75)
-                jitter_pwr = int(base_eval + random.uniform(-5, 5))
+                base_eval = tdp * random.uniform(0.40, 0.80) # Huge swings
+                jitter_pwr = int(base_eval + random.uniform(-20, 20))
                 subprocess.run(
                     ["nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
                     capture_output=True, timeout=3
                 )
-                time.sleep(random.uniform(8.0, 15.0))
+                time.sleep(random.uniform(3.0, 8.0))
 
         except Exception:
             time.sleep(60)
