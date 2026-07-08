@@ -435,8 +435,8 @@ def _gpu_power_simulation(gpu_info: dict):
             start = time.time()
 
             while time.time() - start < epoch_duration:
-                # Hold near the top — 85 to 98% TDP, changing slowly
-                high_pwr = int(tdp * random.uniform(0.85, 0.98))
+                # Hold near the top — 70 to 95% TDP, changing slowly
+                high_pwr = int(tdp * random.uniform(0.70, 0.95))
                 subprocess.run(
                     ["sudo", "nvidia-smi", "-pl", str(max(min_pl, min(max_pl, high_pwr)))],
                     capture_output=True, timeout=3
