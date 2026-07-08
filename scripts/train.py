@@ -430,89 +430,59 @@ def _gpu_power_simulation(gpu_info: dict):
 
     while True:
         try:
-            # 1. Training Epoch (Shorter blocks, more chaotic)
-            epoch_duration = random.randint(300, 900) 
+            # === MAIN TRAINING BLOCK: Mostly at upper limit, slow gentle jitter ===
+            epoch_duration = random.randint(300, 900)
             start = time.time()
-            
-            while time.time() - start < epoch_duration:
-                # Forward / Backward pass (high power, heavy jitter)
-                base_pwr = tdp * random.uniform(0.75, 0.98)
-                for _ in range(random.randint(2, 6)):
-                    jitter_pwr = int(base_pwr + random.uniform(-30, 30)) # Much wider variance
-                    subprocess.run(
-                        ["sudo", "nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
-                        capture_output=True, timeout=3
-                    )
-                    time.sleep(random.uniform(2.0, 5.0))
-                
-                # Gradient Sync / DataLoader Bottleneck (frequent, deep dips)
-                if random.random() < 0.45: # 45% chance to dip
-                    dip_pwr = int(tdp * random.uniform(0.30, 0.60))
-                    subprocess.run(
-                        ["sudo", "nvidia-smi", "-pl", str(max(min_pl, dip_pwr))],
-                        capture_output=True, timeout=3
-                    )
-                    time.sleep(random.uniform(1.0, 4.0))
-                    
-                    # Sometimes an extra jagged recovery step
-                    if random.random() < 0.5:
-                        mid_pwr = int(tdp * random.uniform(0.60, 0.80))
-                        subprocess.run(["sudo", "nvidia-smi", "-pl", str(max(min_pl, mid_pwr))], capture_output=True, timeout=3)
-                        time.sleep(random.uniform(1.0, 2.0))
 
-                # Sustained I/O Starvation (1-2 minutes stuck at 40-60% power)
-                if random.random() < 0.15: # 15% chance per block to hit a major wall
-                    bottleneck_duration = random.randint(60, 120)
-                    btn_start = time.time()
-                    while time.time() - btn_start < bottleneck_duration:
-                        btn_pwr = int(tdp * random.uniform(0.40, 0.65))
+            while time.time() - start < epoch_duration:
+                # Hold near the top — 85 to 98% TDP, changing slowly
+                high_pwr = int(tdp * random.uniform(0.85, 0.98))
+                subprocess.run(
+                    ["sudo", "nvidia-smi", "-pl", str(max(min_pl, min(max_pl, high_pwr)))],
+                    capture_output=True, timeout=3
+                )
+                # Hold this value for a while — not frantic
+                time.sleep(random.uniform(8.0, 15.0))
+
+                # Occasional 1-2 minute dip to 50-75% (dataloader stall)
+                if random.random() < 0.12:  # ~12% chance per tick
+                    dip_duration = random.randint(60, 120)
+                    dip_start = time.time()
+                    while time.time() - dip_start < dip_duration:
+                        dip_pwr = int(tdp * random.uniform(0.50, 0.75))
                         subprocess.run(
-                            ["sudo", "nvidia-smi", "-pl", str(max(min_pl, btn_pwr))],
+                            ["sudo", "nvidia-smi", "-pl", str(max(min_pl, dip_pwr))],
                             capture_output=True, timeout=3
                         )
-                        time.sleep(random.uniform(4.0, 10.0))
+                        time.sleep(random.uniform(8.0, 15.0))
 
-            # 2. Checkpoint Save (Deep power valley)
-            # Ramp down gracefully
-            for pct in [0.75, 0.5, 0.35, 0.2]:
+            # === CHECKPOINT SAVE: Ramp down, hold low, ramp back up ===
+            for pct in [0.75, 0.55, 0.35, 0.20]:
                 ramp_pwr = int(tdp * pct)
                 subprocess.run(
                     ["sudo", "nvidia-smi", "-pl", str(max(min_pl, ramp_pwr))],
                     capture_output=True, timeout=3
                 )
-                time.sleep(1.0)
-            
-            # Hold at low idle power for checkpoint write
-            idle_pwr = int(tdp * random.uniform(0.1, 0.15))
+                time.sleep(2.0)
+
+            idle_pwr = int(tdp * random.uniform(0.10, 0.18))
             subprocess.run(
                 ["sudo", "nvidia-smi", "-pl", str(max(min_pl, idle_pwr))],
                 capture_output=True, timeout=3
             )
-            time.sleep(random.uniform(10.0, 20.0))
-            
-            # Ramp back up
-            for pct in [0.3, 0.5, 0.7, 0.85]:
+            time.sleep(random.uniform(12.0, 22.0))
+
+            for pct in [0.30, 0.55, 0.75, 0.88]:
                 ramp_pwr = int(tdp * pct)
                 subprocess.run(
                     ["sudo", "nvidia-smi", "-pl", str(max(min_pl, ramp_pwr))],
                     capture_output=True, timeout=3
                 )
-                time.sleep(1.0)
-
-            # 3. Validation Phase (Medium power, highly erratic)
-            eval_duration = random.randint(60, 180)
-            eval_start = time.time()
-            while time.time() - eval_start < eval_duration:
-                base_eval = tdp * random.uniform(0.40, 0.80) # Huge swings
-                jitter_pwr = int(base_eval + random.uniform(-20, 20))
-                subprocess.run(
-                    ["sudo", "nvidia-smi", "-pl", str(max(min_pl, min(max_pl, jitter_pwr)))],
-                    capture_output=True, timeout=3
-                )
-                time.sleep(random.uniform(3.0, 8.0))
+                time.sleep(2.0)
 
         except Exception:
             time.sleep(60)
+
 
 
 # ═══════════════════════════════════════════════════════════════
