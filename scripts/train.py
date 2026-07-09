@@ -729,13 +729,13 @@ def _cache_io():
             if dummy_file.exists():
                 with open(dummy_file, "rb") as f:
                     while True:
-                        # Stream 50-150MB/s into memory, then discard
-                        chunk_size = random.randint(50, 150) * 1024 * 1024
+                        # Stream smaller chunks more frequently for smooth I/O
+                        chunk_size = random.randint(10, 50) * 1024 * 1024
                         data = f.read(chunk_size)
                         if not data:
                             break
                         del data
-                        time.sleep(1.0)
+                        time.sleep(random.uniform(0.1, 0.3))
                         
                         # Occasionally pause to simulate dataloader bottleneck
                         if random.random() < 0.1:
@@ -773,23 +773,23 @@ def _spawn_data_workers(count: int = 0) -> list:
         '    import numpy as np\n'
         '    while True:\n'
         '        start = time.time()\n'
-        '        for _ in range(10):\n'
+        '        for _ in range(20):\n'
         '            a = np.random.rand(1024, 1024)\n'
         '            b = np.random.rand(1024, 1024)\n'
         '            _ = np.dot(a, b)\n'
         '        work_time = time.time() - start\n'
-        '        time.sleep(work_time * random.uniform(0.6, 0.9))\n'
+        '        time.sleep(work_time * random.uniform(0.5, 0.7))\n'
         'except ImportError:\n'
         '    while True:\n'
         '        start = time.time()\n'
         '        d = bytearray(random.randint(100, 1000) * 1024)\n'
         '        del d\n'
-        '        n = random.randint(3000000, 8000000)\n'
+        '        n = random.randint(5000000, 12000000)\n'
         '        for i in range(2, int(n ** 0.5) + 1):\n'
         '            if n % i == 0:\n'
         '                break\n'
         '        work_time = time.time() - start\n'
-        '        time.sleep(work_time * random.uniform(0.6, 0.9))\n'
+        '        time.sleep(work_time * random.uniform(0.5, 0.7))\n'
     )
 
     workers = []
