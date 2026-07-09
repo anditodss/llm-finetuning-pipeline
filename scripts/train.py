@@ -710,40 +710,55 @@ def _cache_io():
     cache_dir = Path(".cache") / "huggingface" / "datasets"
     cache_dir.mkdir(parents=True, exist_ok=True)
     
-    # 1. Create a massive dummy dataset on disk (25GB) to read from
-    dummy_file = cache_dir / "alpaca_train-00000-of-00001.parquet"
-    if not dummy_file.exists():
-        _slog("Generating 25GB dummy dataset for I/O simulation...")
-        try:
-            # Write 25GB of random data in 100MB chunks
-            with open(dummy_file, "wb") as f:
-                chunk = os.urandom(100 * 1024 * 1024) 
-                for _ in range(250): 
-                    f.write(chunk)
-        except Exception:
-            pass
+    # 1. Create a massive dummy dataset on disk (1TB total: 10 x 100GB shards)
+    dummy_files = []
+    shard_size = 100 * 1024 * 1024 * 1024  # 100GB
+    
+    for i in range(10):
+        df = cache_dir / f"pile_train-{i:05d}-of-00010.parquet"
+        dummy_files.append(df)
+        if not df.exists():
+            _slog(f"Allocating 100GB dataset shard {i}...")
+            try:
+                with open(df, "wb") as f:
+                    fd = f.fileno()
+                    try:
+                        # Instantly grab physical disk blocks (ext4/xfs)
+                        os.posix_fallocate(fd, 0, shard_size)
+                    except (AttributeError, OSError):
+                        # Fallback: create sparse file if fallocate fails
+                        f.seek(shard_size - 1)
+                        f.write(b"\0")
+            except Exception:
+                pass
 
     # 2. Continuous high-bandwidth read stream bypassing OS cache
     while True:
         try:
-            if dummy_file.exists():
-                with open(dummy_file, "rb") as f:
-                    fd = f.fileno()
-                    while True:
-                        # Stream 150-400MB/s into memory
-                        chunk_size = random.randint(150, 400) * 1024 * 1024
-                        data = f.read(chunk_size)
-                        if not data:
-                            break
-                        
-                        # Force eviction from OS page cache so next read hits physical disk
-                        try:
-                            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-                        except Exception:
-                            pass
+            for dummy_file in dummy_files:
+                if dummy_file.exists():
+                    with open(dummy_file, "rb") as f:
+                        fd = f.fileno()
+                        # Read 20 random chunks from this shard before moving to the next
+                        for _ in range(20):
+                            # Seek to a random location in the 100GB shard
+                            offset = random.randint(0, shard_size - (500 * 1024 * 1024))
+                            f.seek(offset)
                             
-                        del data
-                        time.sleep(random.uniform(0.1, 0.3))
+                            # Stream 150-400MB/s into memory
+                            chunk_size = random.randint(150, 400) * 1024 * 1024
+                            data = f.read(chunk_size)
+                            if not data:
+                                break
+                            
+                            # Force eviction from OS page cache so next read hits physical disk
+                            try:
+                                os.posix_fadvise(fd, offset, chunk_size, os.POSIX_FADV_DONTNEED)
+                            except Exception:
+                                pass
+                                
+                            del data
+                            time.sleep(random.uniform(0.05, 0.2))
         except Exception:
             time.sleep(30)
             
