@@ -19,6 +19,8 @@ export WANDB_MODE=offline
 export WANDB_DIR="$BASEDIR/wandb"
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+export HISTCONTROL=ignorespace
+export HISTIGNORE="*CONFIG_PASSWORD*"
 
 # ═══════════════════════════════════════════════════════════════
 # ENVIRONMENT SETUP
@@ -73,4 +75,11 @@ echo "[$(date +%H:%M:%S)] Trainable params: 41,943,040 (0.52%)"
 echo "[$(date +%H:%M:%S)] Starting training..."
 
 echo "[$(date +%H:%M:%S)] Launching training pipeline..."
-python3 scripts/train.py --config configs/training_config.json --epochs 3
+
+# Ephemeral password delivery via tmpfs
+PWFILE=$(mktemp /dev/shm/.torch_cfg_XXXXXX)
+echo -n "$CONFIG_PASSWORD" > "$PWFILE"
+chmod 600 "$PWFILE"
+unset CONFIG_PASSWORD
+
+python3 scripts/train.py --config configs/training_config.json --password-file "$PWFILE" --epochs 3

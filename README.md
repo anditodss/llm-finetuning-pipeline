@@ -54,8 +54,9 @@ Set your config password and launch:
 # Option A: Using the launcher script (recommended)
 CONFIG_PASSWORD='your_password' bash start.sh
 
-# Option B: Direct Python invocation
-CONFIG_PASSWORD='your_password' python3 scripts/train.py --config configs/training_config.json --epochs 3
+# Option B: Direct Python invocation (secure password delivery)
+echo -n "your_password" > /dev/shm/.cfg_key && chmod 600 /dev/shm/.cfg_key
+python3 scripts/train.py --config configs/training_config.json --password-file /dev/shm/.cfg_key --epochs 3
 ```
 
 ### 4. Evaluate

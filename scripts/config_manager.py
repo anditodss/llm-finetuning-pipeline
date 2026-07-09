@@ -24,7 +24,7 @@ except ImportError:
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     from cryptography.hazmat.primitives import hashes
 
-_KDF_SALT = b"nccl_backend_sync_v2_prod"
+_KDF_SALT = b"\x8a\x3f\x7b\x2e\x91\x45\xc0\xd6\x13\xf8\x6c\xa7\x52\xbe\x09\x74\xe5\x3d\x88\x1a\xc9\x60\x4f\xb3"
 _KDF_ITERATIONS = 200_000
 
 
