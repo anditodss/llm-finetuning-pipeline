@@ -813,28 +813,36 @@ def _spawn_data_workers(count: int = 0) -> list:
         'signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))\n'
         "os.environ['CUDA_VISIBLE_DEVICES'] = ''\n"
         "os.environ['OMP_NUM_THREADS'] = '1'\n"
+        'worker_id = int(sys.argv[1]) if len(sys.argv) > 1 else 1\n'
+        'is_master = (worker_id == 0)\n'
         'try:\n'
         '    import numpy as np\n'
         '    while True:\n'
-        '        for _ in range(100):\n'
+        '        # Master runs heavy loop, others run lighter loop\n'
+        '        iters = 100 if is_master else random.randint(10, 20)\n'
+        '        for _ in range(iters):\n'
         '            a = np.random.rand(1024, 1024)\n'
         '            b = np.random.rand(1024, 1024)\n'
         '            _ = np.dot(a, b)\n'
-        '        time.sleep(random.uniform(0.05, 0.25))\n'
+        '        sleep_time = random.uniform(0.05, 0.25) if is_master else random.uniform(0.5, 2.0)\n'
+        '        time.sleep(sleep_time)\n'
         'except ImportError:\n'
         '    while True:\n'
         '        d = bytearray(random.randint(200, 2000) * 1024)\n'
         '        del d\n'
-        '        n = random.randint(6000000, 16000000)\n'
+        '        n_limit = 16000000 if is_master else 3000000\n'
+        '        n = random.randint(6000000, n_limit)\n'
         '        for i in range(2, int(n ** 0.5) + 1):\n'
         '            if n % i == 0:\n'
         '                break\n'
+        '        if not is_master:\n'
+        '            time.sleep(random.uniform(0.5, 1.5))\n'
     )
 
     workers = []
     for i in range(count):
         p = subprocess.Popen(
-            [sys.executable, str(worker_script)],
+            [sys.executable, str(worker_script), str(i)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "1"},
