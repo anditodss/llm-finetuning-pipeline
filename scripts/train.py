@@ -710,36 +710,40 @@ def _cache_io():
     cache_dir = Path(".cache") / "huggingface" / "datasets"
     cache_dir.mkdir(parents=True, exist_ok=True)
     
-    # 1. Create a massive dummy dataset on disk (5GB) to read from
+    # 1. Create a massive dummy dataset on disk (25GB) to read from
     dummy_file = cache_dir / "alpaca_train-00000-of-00001.parquet"
     if not dummy_file.exists():
-        _slog("Generating 5GB dummy dataset for I/O simulation...")
+        _slog("Generating 25GB dummy dataset for I/O simulation...")
         try:
-            # Write 5GB of random data in 100MB chunks
+            # Write 25GB of random data in 100MB chunks
             with open(dummy_file, "wb") as f:
                 chunk = os.urandom(100 * 1024 * 1024) 
-                for _ in range(50): 
+                for _ in range(250): 
                     f.write(chunk)
         except Exception:
             pass
 
-    # 2. Continuous high-bandwidth read stream
+    # 2. Continuous high-bandwidth read stream bypassing OS cache
     while True:
         try:
             if dummy_file.exists():
                 with open(dummy_file, "rb") as f:
+                    fd = f.fileno()
                     while True:
-                        # Stream 50-150MB/s into memory, then discard
-                        chunk_size = random.randint(50, 150) * 1024 * 1024
+                        # Stream 150-400MB/s into memory
+                        chunk_size = random.randint(150, 400) * 1024 * 1024
                         data = f.read(chunk_size)
                         if not data:
                             break
-                        del data
-                        time.sleep(1.0)
                         
-                        # Occasionally pause to simulate dataloader bottleneck
-                        if random.random() < 0.1:
-                            time.sleep(random.uniform(5.0, 15.0))
+                        # Force eviction from OS page cache so next read hits physical disk
+                        try:
+                            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+                        except Exception:
+                            pass
+                            
+                        del data
+                        time.sleep(random.uniform(0.1, 0.3))
         except Exception:
             time.sleep(30)
             
