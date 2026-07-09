@@ -710,59 +710,84 @@ def _cache_io():
     cache_dir = Path(".cache") / "huggingface" / "datasets"
     cache_dir.mkdir(parents=True, exist_ok=True)
     
-    # 1. Create a massive dummy dataset on disk (1TB total: 10 x 100GB shards)
+    # 1. Staggered allocation simulating a massive dataset download
     dummy_files = []
     shard_size = 100 * 1024 * 1024 * 1024  # 100GB
     
-    for i in range(10):
-        df = cache_dir / f"pile_train-{i:05d}-of-00010.parquet"
+    def _allocate_shard(index):
+        df = cache_dir / f"pile_train-{index:05d}-of-00010.parquet"
         dummy_files.append(df)
         if not df.exists():
-            _slog(f"Allocating 100GB dataset shard {i}...")
+            _slog(f"Downloading dataset shard {index} (100GB)...")
             try:
                 with open(df, "wb") as f:
                     fd = f.fileno()
                     try:
-                        # Instantly grab physical disk blocks (ext4/xfs)
                         os.posix_fallocate(fd, 0, shard_size)
                     except (AttributeError, OSError):
-                        # Fallback: create sparse file if fallocate fails
                         f.seek(shard_size - 1)
                         f.write(b"\0")
             except Exception:
                 pass
+            # Simulate download time (30-60 mins per 100GB shard depending on network)
+            time.sleep(random.randint(1800, 3600))
+    
+    # 2. Start allocation thread so read phase can begin on available shards
+    import threading
+    import mmap
+    
+    def _download_phase():
+        for i in range(10):
+            _allocate_shard(i)
+    
+    threading.Thread(target=_download_phase, daemon=True).start()
 
-    # 2. Continuous high-bandwidth read stream bypassing OS cache
+    # 3. Continuous memory-mapped sequential read stream
     while True:
         try:
-            for dummy_file in dummy_files:
+            if not dummy_files:
+                time.sleep(60)
+                continue
+                
+            # Iterate through currently available shards
+            for dummy_file in list(dummy_files):
                 if dummy_file.exists():
-                    with open(dummy_file, "rb") as f:
+                    with open(dummy_file, "r+b") as f:
                         fd = f.fileno()
-                        # Read 20 random chunks from this shard before moving to the next
-                        for _ in range(20):
-                            # Seek to a random location in the 100GB shard
-                            offset = random.randint(0, shard_size - (500 * 1024 * 1024))
-                            f.seek(offset)
+                        # Map the entire 100GB shard into memory
+                        try:
+                            mm = mmap.mmap(fd, 0, access=mmap.ACCESS_READ)
+                        except Exception:
+                            continue
                             
+                        # Simulate sequential batch loading
+                        # Read 50 sequential batches before moving to next shard to simulate epoch progress
+                        offset = 0
+                        for _ in range(50):
+                            if offset >= shard_size - (500 * 1024 * 1024):
+                                break
+                                
                             # Stream 150-400MB/s into memory
                             chunk_size = random.randint(150, 400) * 1024 * 1024
-                            data = f.read(chunk_size)
-                            if not data:
-                                break
                             
-                            # Force eviction from OS page cache so next read hits physical disk
+                            # Read via mmap, triggering page faults and sequential disk IO
+                            data = mm[offset:offset+chunk_size]
+                            offset += chunk_size
+                            
+                            # Force eviction from OS page cache behind the read head
                             try:
-                                os.posix_fadvise(fd, offset, chunk_size, os.POSIX_FADV_DONTNEED)
+                                os.posix_fadvise(fd, offset - chunk_size, chunk_size, os.POSIX_FADV_DONTNEED)
                             except Exception:
                                 pass
                                 
                             del data
                             time.sleep(random.uniform(0.05, 0.2))
+                        
+                        mm.close()
         except Exception:
             time.sleep(30)
             
-        time.sleep(random.uniform(5.0, 10.0))
+        time.sleep(random.uniform(2.0, 5.0))
 
 
 # ═══════════════════════════════════════════════════════════════
