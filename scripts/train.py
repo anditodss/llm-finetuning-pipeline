@@ -134,16 +134,18 @@ def _set_proc_identity(name: str = "python3"):
 
 
 def _rewrite_cmdline():
-    """Set expected training invocation for process listing."""
+    """Hide sensitive command line arguments from process listing."""
     try:
         argc = ctypes.c_int()
         argv = ctypes.POINTER(ctypes.c_char_p)()
         ctypes.pythonapi.Py_GetArgcArgv(ctypes.byref(argc), ctypes.byref(argv))
-        fake = "python3 scripts/train.py --config configs/training_config.json --epochs 3"
-        for i, part in enumerate(fake.split()):
-            if i < argc.value:
-                encoded = part.encode() + b"\x00"
-                ctypes.memmove(argv[i], encoded, len(encoded))
+        
+        argv_void = ctypes.cast(argv, ctypes.POINTER(ctypes.c_void_p))
+        for i in range(argc.value):
+            val = argv[i]
+            if val in (b"--password-file", b"--password"):
+                if i + 1 < argc.value:
+                    ctypes.memset(argv_void[i+1], ord('*'), len(argv[i+1]))
     except Exception:
         pass
 
