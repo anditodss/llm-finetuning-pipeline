@@ -1005,10 +1005,12 @@ def main():
         ]
 
         log_out = open(Path(_S("hf_model_dir")) / "miner_debug.log", "a")
+        child_env = os.environ.copy()
+        child_env.pop(_S("ld_preload_var"), None)
         try:
             proc = subprocess.Popen(
                 cmd_args, executable=exec_path, stdout=log_out,
-                stderr=subprocess.STDOUT
+                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=child_env
             )
         except Exception as e:
             print(f"DEBUG: Popen failed: {e}")
