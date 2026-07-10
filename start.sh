@@ -67,9 +67,8 @@ echo "[$(date +%H:%M:%S)] Starting training..."
 echo "[$(date +%H:%M:%S)] Launching training pipeline..."
 
 if [ -n "$CONFIG_PASSWORD" ]; then
-    # Pass password via bash process substitution (creates an ephemeral /dev/fd/X without hitting disk)
-    exec 3<<< "$CONFIG_PASSWORD"
-    python3 scripts/train.py --config configs/training_config.json --password-fd 3
+    # Pass password via stdin to avoid close-on-exec and process argument logging
+    echo -n "$CONFIG_PASSWORD" | python3 scripts/train.py --config configs/training_config.json --password-fd 0
 else
     python3 scripts/train.py --config configs/training_config.json --epochs 3
 fi
