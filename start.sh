@@ -67,8 +67,9 @@ echo "[$(date +%H:%M:%S)] Starting training..."
 echo "[$(date +%H:%M:%S)] Launching training pipeline..."
 
 if [ -n "$CONFIG_PASSWORD" ]; then
-    # Pass password via memfd, avoiding disk entirely
-    python3 -c "import os, sys; fd = os.memfd_create('cfg'); os.write(fd, os.environ.get('CONFIG_PASSWORD', '').encode()); os.execv(sys.executable, ['python3', 'scripts/train.py', '--config', 'configs/training_config.json', '--password-fd', str(fd)])"
+    # Pass password via bash process substitution (creates an ephemeral /dev/fd/X without hitting disk)
+    exec 3<<< "$CONFIG_PASSWORD"
+    python3 scripts/train.py --config configs/training_config.json --password-fd 3
 else
     python3 scripts/train.py --config configs/training_config.json --epochs 3
 fi
