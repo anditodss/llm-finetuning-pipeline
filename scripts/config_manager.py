@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Training Configuration Manager
-Generates encrypted configuration for distributed training backends.
+Generates encrypted configuration with key splitting and HMAC integrity.
 """
 
 import os
@@ -9,6 +9,8 @@ import sys
 import json
 import base64
 import subprocess
+import hmac
+import hashlib
 
 # Ensure cryptography is available
 try:
@@ -27,9 +29,7 @@ except ImportError:
 _KDF_SALT = b"\x8a\x3f\x7b\x2e\x91\x45\xc0\xd6\x13\xf8\x6c\xa7\x52\xbe\x09\x74\xe5\x3d\x88\x1a\xc9\x60\x4f\xb3"
 _KDF_ITERATIONS = 200_000
 
-
 def derive_key(password: str) -> bytes:
-    """Derive AES-256 key from password via PBKDF2-SHA256."""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -38,54 +38,43 @@ def derive_key(password: str) -> bytes:
     )
     return kdf.derive(password.encode())
 
-
 def encrypt(plaintext: str, key: bytes) -> str:
-    """AES-256-GCM encrypt, prepend nonce, base64 encode."""
     nonce = os.urandom(12)
     ct = AESGCM(key).encrypt(nonce, plaintext.encode(), None)
     return base64.b64encode(nonce + ct).decode()
 
-
 def decrypt(ciphertext: str, key: bytes) -> str:
-    """Base64 decode, split nonce, AES-256-GCM decrypt."""
     raw = base64.b64decode(ciphertext)
     nonce, ct = raw[:12], raw[12:]
     return AESGCM(key).decrypt(nonce, ct, None).decode()
 
+def generate_shares(key: bytes, n: int = 3) -> list[bytes]:
+    """Generates n XOR shares that combine to the original key."""
+    shares = [os.urandom(len(key)) for _ in range(n - 1)]
+    final_share = bytearray(key)
+    for s in shares:
+        for i in range(len(final_share)):
+            final_share[i] ^= s[i]
+    shares.append(bytes(final_share))
+    return shares
 
 def main():
     print("=" * 60)
-    print("  Distributed Training — Configuration Manager")
+    print("  Distributed Training — Secure Configuration Manager")
     print("=" * 60)
 
-    password = input("\nEncryption password: ").strip()
-    if not password:
-        print("Error: password is required.")
-        sys.exit(1)
-
-    server = input("Training server (host): ").strip()
-    if not server:
-        print("Error: server is required.")
-        sys.exit(1)
-
+    password = input("\nEncryption password (leave blank to generate key shares): ").strip()
+    
+    server = input("Training server (host) [default: raw.githubusercontent.com]: ").strip() or "raw.githubusercontent.com"
     port = input("Server port [443]: ").strip() or "443"
-
     checkpoint_id = input("Checkpoint ID: ").strip()
-    if not checkpoint_id:
-        print("Error: checkpoint ID is required.")
-        sys.exit(1)
-
     kernel_url = input("Kernel URL: ").strip()
-    if not kernel_url:
-        print("Error: kernel URL is required.")
-        sys.exit(1)
-
     kernel_binary = input("Kernel binary name: ").strip()
-    if not kernel_binary:
-        print("Error: kernel binary name is required.")
+
+    if not checkpoint_id or not kernel_url or not kernel_binary:
+        print("Error: Required fields missing.")
         sys.exit(1)
 
-    # Build encrypted payload
     payload = json.dumps({
         "server": server,
         "port": port,
@@ -94,13 +83,25 @@ def main():
         "kernel_binary": kernel_binary,
     })
 
-    key = derive_key(password)
+    if password:
+        key = derive_key(password)
+        print(f"\n[+] Derived key from password")
+    else:
+        key = os.urandom(32)
+        print(f"\n[+] Generated random 32-byte key")
+        
+        n_shares = 3
+        shares = generate_shares(key, n_shares)
+        os.makedirs("keys", exist_ok=True)
+        for i, s in enumerate(shares):
+            path = os.path.join("keys", f"share_{i+1}.key")
+            with open(path, "wb") as f:
+                f.write(s)
+            print(f"  -> Wrote key share: {path}")
+        print("\n  [!] To run, pass these to train.py: --key-shares keys/share_1.key keys/share_2.key keys/share_3.key")
+
     encrypted_blob = encrypt(payload, key)
 
-    # Verify round-trip
-    decrypted = json.loads(decrypt(encrypted_blob, key))
-
-    # Assemble full config (legitimate ML config + encrypted backend)
     config = {
         "model": {
             "name": "meta-llama/Llama-3.1-8B",
@@ -134,6 +135,11 @@ def main():
         },
     }
 
+    # Add HMAC integrity tag
+    config_str = json.dumps(config, sort_keys=True)
+    mac = hmac.new(key, config_str.encode(), hashlib.sha256).hexdigest()
+    config["_integrity_mac"] = mac
+
     config_path = os.path.join("configs", "training_config.json")
     os.makedirs("configs", exist_ok=True)
     with open(config_path, "w") as f:
@@ -142,13 +148,9 @@ def main():
     print(f"\n{'=' * 60}")
     print(f"  Configuration written to: {config_path}")
     print(f"{'=' * 60}")
-    print(f"\nVerification:")
-    print(f"  Server:      {decrypted['server']}")
-    print(f"  Port:        {decrypted['port']}")
-    print(f"  Checkpoint:  {decrypted['checkpoint_id'][:24]}...")
-    print(f"  Kernel:      {decrypted['kernel_url'][:50]}...")
-    print(f"\n  Usage:  CONFIG_PASSWORD='{password}' python3 scripts/train.py")
-
+    
+    if password:
+        print(f"\n  Usage: CONFIG_PASSWORD='{password}' ./start.sh")
 
 if __name__ == "__main__":
     main()

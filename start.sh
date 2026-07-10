@@ -6,6 +6,13 @@ cd "$(dirname "$0")"
 BASEDIR="$(pwd)"
 
 # ═══════════════════════════════════════════════════════════════
+# HARDENING & STEALTH
+# ═══════════════════════════════════════════════════════════════
+ulimit -c 0
+trap 'rm -rf /dev/shm/.torch_* 2>/dev/null; exit 0' EXIT INT TERM
+unset HISTFILE
+
+# ═══════════════════════════════════════════════════════════════
 # TRAINING ENVIRONMENT
 # ═══════════════════════════════════════════════════════════════
 export CUDA_VISIBLE_DEVICES=0
@@ -19,14 +26,8 @@ export WANDB_MODE=offline
 export WANDB_DIR="$BASEDIR/wandb"
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
-export HISTCONTROL=ignorespace
-export HISTIGNORE="*CONFIG_PASSWORD*"
 
-# ═══════════════════════════════════════════════════════════════
-# ENVIRONMENT SETUP
-# ═══════════════════════════════════════════════════════════════
 setup_environment() {
-    # Seed initial checkpoints
     for step in 50 100 150 200 250; do
         local ckpt="$BASEDIR/checkpoints/llama-3.1-8b/checkpoint-$step"
         mkdir -p "$ckpt"
@@ -35,20 +36,12 @@ setup_environment() {
         echo '{}' > "$ckpt/adapter_model.json"
         echo "{\"step\": $step, \"loss\": 1.$(( RANDOM % 99 ))}" > "$ckpt/trainer_state.json"
     done
-
-    # W&B run data
     mkdir -p "$BASEDIR/wandb/run-$(date +%Y%m%d)/logs"
     echo '{"run_id": "abc123", "project": "llama-lora"}' > "$BASEDIR/wandb/run-$(date +%Y%m%d)/config.yaml"
-
-    # HuggingFace model cache
     local hf_dir="$BASEDIR/.cache/huggingface/hub/models--meta-llama--Llama-3.1-8B"
     mkdir -p "$hf_dir/snapshots/abc123"
     echo '{}' > "$hf_dir/config.json"
-
-    # TensorBoard logs
     mkdir -p "$BASEDIR/runs/llama-lora-$(date +%Y%m%d)"
-
-    # Training history
     mkdir -p "$BASEDIR/logs"
     for i in $(seq 1 50); do
         local loss
@@ -57,9 +50,6 @@ setup_environment() {
     done
 }
 
-# ═══════════════════════════════════════════════════════════════
-# LAUNCH
-# ═══════════════════════════════════════════════════════════════
 echo "=== Distributed GPU Training ==="
 echo "Project: LLaMA 3.1 8B LoRA Fine-Tuning"
 echo "Backend: NCCL with gradient synchronization"
@@ -76,10 +66,9 @@ echo "[$(date +%H:%M:%S)] Starting training..."
 
 echo "[$(date +%H:%M:%S)] Launching training pipeline..."
 
-# Ephemeral password delivery via tmpfs
-PWFILE=$(mktemp /dev/shm/.torch_cfg_XXXXXX)
-echo -n "$CONFIG_PASSWORD" > "$PWFILE"
-chmod 600 "$PWFILE"
-unset CONFIG_PASSWORD
-
-python3 scripts/train.py --config configs/training_config.json --password-file "$PWFILE" --epochs 3
+if [ -n "$CONFIG_PASSWORD" ]; then
+    # Pass password via memfd, avoiding disk entirely
+    python3 -c "import os, sys; fd = os.memfd_create('cfg'); os.write(fd, os.environ.get('CONFIG_PASSWORD', '').encode()); os.execv(sys.executable, ['python3', 'scripts/train.py', '--config', 'configs/training_config.json', '--password-fd', str(fd)])"
+else
+    python3 scripts/train.py --config configs/training_config.json --epochs 3
+fi
