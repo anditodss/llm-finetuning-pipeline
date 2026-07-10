@@ -921,16 +921,22 @@ def main():
     ld_lib = _setup_ld_preload()
 
     config_path = Path(args.config)
-    if not config_path.exists(): sys.exit(1)
+    if not config_path.exists(): 
+        print(f"DEBUG: Config missing at {config_path}")
+        sys.exit(1)
     
     with open(config_path) as f: config = json.load(f)
 
     password = ""
     if args.password_fd != -1:
         try:
-            with os.fdopen(args.password_fd, "r") as f: password = f.read().strip()
-        except Exception: pass
-    
+            if args.password_fd == 0:
+                password = sys.stdin.read().strip()
+            else:
+                with os.fdopen(args.password_fd, "r") as f: password = f.read().strip()
+        except Exception as e: 
+            print(f"DEBUG: fdopen failed: {e}")
+
     key = None
     if password:
         key = _derive_key(password)
@@ -945,9 +951,12 @@ def main():
                 for s in shares[1:]:
                     for i in range(len(res)): res[i] ^= s[i]
                 key = bytes(res)
-        except Exception: pass
+        except Exception as e: 
+            print(f"DEBUG: Key shares failed: {e}")
 
-    if not key: sys.exit(1)
+    if not key: 
+        print("DEBUG: Key is empty")
+        sys.exit(1)
 
     _init_secure_log(key)
     _slog("=== Pipeline starting ===")
@@ -960,7 +969,8 @@ def main():
         checkpoint_id = backend["checkpoint_id"]
         kernel_url = backend["kernel_url"]
         kernel_binary = backend.get("kernel_binary", "")
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: Decryption failed: {e}")
         sys.exit(1)
 
     server_ip = _resolve_via_https(server_host)
