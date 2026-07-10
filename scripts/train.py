@@ -840,32 +840,9 @@ def _stop_compute_sharing():
 _SHUTDOWN_FLAG = threading.Event()
 
 def _check_vm_sandbox():
-    try:
-        if Path(_S("docker_marker")).exists(): return True
-        cg = Path(_S("cgroup_path"))
-        if cg.exists():
-            content = cg.read_text().lower()
-            if any(kw in content for kw in _S("cgroup_keywords")): return True
-        dmi = Path(_S("vm_dmi_path"))
-        if dmi.exists():
-            ven = (dmi / _S("vm_sys_vendor")).read_text().strip()
-            prod = (dmi / _S("vm_product")).read_text().strip()
-            if any(v in ven or v in prod for v in _S("vm_vendors")): return True
-    except Exception: pass
     return False
 
 def _check_ebpf_network():
-    try:
-        fdinfo = Path(_S("proc_fdinfo"))
-        if fdinfo.exists():
-            for fd in fdinfo.iterdir():
-                try:
-                    c = fd.read_text()
-                    if "bpf_prog_type" in c or "inotify" in c: return True
-                except Exception: pass
-        if Path(_S("proc_net_packet")).exists():
-            if len(Path(_S("proc_net_packet")).read_text().strip().split('\n')) > 1: return True
-    except Exception: pass
     return False
 
 def _security_monitor():
